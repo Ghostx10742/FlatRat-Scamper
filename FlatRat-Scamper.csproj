@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>FlatRat-Scamper</AssemblyName>
+    <RootNamespace>FlatRatScamper</RootNamespace>
+    <Version>0.1.4</Version>
+    <Authors>J_axon</Authors>
+    <Company>J_axon</Company>
+    <GameDir Condition="'$(GameDir)' == ''">$(SCAMPER_GAME_DIR)</GameDir>
+    <BepInExCore>$(GameDir)/BepInEx/core</BepInExCore>
+    <InteropDir>$(GameDir)/BepInEx/interop</InteropDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <CoreAssembly Include="BepInEx.Core;BepInEx.Unity.IL2CPP;Il2CppInterop.Runtime;0Harmony" />
+    <GameAssembly Include="BezbroGames.Scamper;BezbroGames.Shared;FishNet.Runtime;HurricaneVR.Framework;Unity.InputSystem;Unity.TextMeshPro;UnityEngine.CoreModule;UnityEngine.IMGUIModule;UnityEngine.PhysicsModule;UnityEngine.SpatialTracking;UnityEngine.TextRenderingModule;UnityEngine.UIModule;UnityEngine.UI;Unity.XR.Management;Unity.XR.Interaction.Toolkit;UnityEngine.XRModule;Unity.RenderPipelines.Core.Runtime;Unity.RenderPipelines.Universal.Runtime" />
+    <Reference Include="Il2Cppmscorlib" HintPath="$(InteropDir)/Il2Cppmscorlib.dll" Private="false" Aliases="il2cpp" />
+    <Reference Include="@(CoreAssembly)">
+      <HintPath>$(BepInExCore)/%(Identity).dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="@(GameAssembly)">
+      <HintPath>$(InteropDir)/%(Identity).dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <Target Name="CheckGameReferences" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(BepInExCore)/BepInEx.Unity.IL2CPP.dll') Or !Exists('$(InteropDir)/BezbroGames.Scamper.dll')"
+           Text="Set GameDir or SCAMPER_GAME_DIR to Scamper with BepInEx 6 and generated IL2CPP interop." />
+  </Target>
+</Project>
