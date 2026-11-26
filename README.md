@@ -52,7 +52,7 @@ Build output goes to `bin/Release/net6.0`. The project uses the BepInEx and IL2C
 
 Scamper was developed and published by **Bezbro Games**. [Scamper on Steam](https://store.steampowered.com/app/2481930/Scamper/)
 
-Thanks to the **BepInEx**, **Il2CppInterop**, and **Cpp2IL** teams and **Andrew1431** for the compatibility pack. The Vertigo 2 Flatscreen Test Mode project informed the desktop camera and hand-control approach. [MoonSweepers-BepInExPack](https://github.com/Andrew1431/MoonSweepers-BepInExPack)
+Thanks to the **BepInEx**, **Il2CppInterop**, and **Cpp2IL** teams and **Andrew1431** for the compatibility pack. [MoonSweepers-BepInExPack](https://github.com/Andrew1431/MoonSweepers-BepInExPack)
 
 ## License
 
@@ -60,4 +60,4 @@ The original FlatRat-Scamper work is licensed under Creative Commons Attribution
 
 ## AI disclosure
 
-AI assisted with coding and documentation. J_axon provided the concept, feature designs, and creative direction.
+AI assisted with coding and documentation. I, J_axon, wrote code and led the project's core development, design, and creative direction.
