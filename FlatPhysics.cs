@@ -1,14 +1,57 @@
 using BezbroGames.Scamper.Core;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using UnityEngine;
 
 namespace FlatRatScamper;
 
 internal static class FlatPhysics
 {
+    private static Il2CppStructArray<RaycastHit> handHits;
+
     internal static float Scale(Player player) => Mathf.Clamp(Mathf.Abs(player.transform.lossyScale.y), 0.05f, 6f);
 
     internal static bool OwnCollider(Player player, Collider collider) =>
         collider != null && (collider.transform.IsChildOf(player.transform) || player.IsPlayerOwnedCollider(collider));
+
+    internal static Vector3 PlaceRestingHand(Player player, Vector3 shoulder, Vector3 target, float scale)
+    {
+        Vector3 path = target - shoulder;
+        float distance = path.magnitude;
+        if (distance <= 0.0001f) return target;
+
+        Vector3 direction = path / distance;
+        float radius = 0.07f * scale;
+        handHits ??= new Il2CppStructArray<RaycastHit>(24);
+        int hits = Physics.SphereCastNonAlloc(shoulder, radius, direction, handHits, distance, WorldMask(player),
+            QueryTriggerInteraction.Ignore);
+        for (int index = 0; index < hits; index++)
+        {
+            var hit = handHits[index];
+            if (hit.collider == null || OwnCollider(player, hit.collider) || hit.distance > distance) continue;
+            distance = Mathf.Max(0f, hit.distance - 0.012f * scale);
+        }
+        return shoulder + direction * distance;
+    }
+
+    internal static Vector3 KeepHandAboveFloor(Player player, Vector3 eye, Vector3 target, float scale)
+    {
+        if (target.y >= eye.y) return target;
+
+        float clearance = 0.025f * scale;
+        var origin = new Vector3(target.x, eye.y, target.z);
+        handHits ??= new Il2CppStructArray<RaycastHit>(24);
+        int hits = Physics.RaycastNonAlloc(origin, Vector3.down, handHits, eye.y - target.y + clearance,
+            WorldMask(player), QueryTriggerInteraction.Ignore);
+        for (int index = 0; index < hits; index++)
+        {
+            var hit = handHits[index];
+            if (hit.normal.y >= 0.55f && hit.collider != null && !OwnCollider(player, hit.collider))
+            {
+                target.y = Mathf.Max(target.y, hit.point.y + clearance);
+            }
+        }
+        return target;
+    }
 
     internal static void Walk(Player player, Vector2 movement, bool sprint, bool jump)
     {

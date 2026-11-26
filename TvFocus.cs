@@ -34,10 +34,16 @@ internal sealed class TvFocus
         renderCameraWasEnabled = renderCamera.enabled;
         body = player.playerRigidBody;
         previousConstraints = body == null ? default : body.constraints;
-        keyboardInput = new TvKeyboard(screen);
-        pointer = new TvPointer(screen);
         try
         {
+            var events = EventSystem.current;
+            if (events == null || !events.isActiveAndEnabled)
+            {
+                // Some map monitors use the in-world touch path with no active EventSystem.
+                events = view.gameObject.AddComponent<EventSystem>();
+            }
+            keyboardInput = new TvKeyboard(screen, events);
+            pointer = new TvPointer(screen, events);
             if (body != null && !body.isKinematic)
             {
                 body.linearVelocity = Vector3.zero;
@@ -71,10 +77,10 @@ internal sealed class TvFocus
         }
     }
 
-    internal static TvFocus TryOpen(TvScreen screen, Camera eye,
+    internal static TvFocus TryOpen(TvScreen screen, RaycastHit screenHit, Camera eye,
         PlayerGlobals globals, Player player)
     {
-        if (!screen.Prepare() || EventSystem.current == null || screen.Mesh.sharedMesh == null)
+        if (!screen.Prepare() || screen.Mesh.sharedMesh == null)
         {
             return null;
         }
@@ -102,30 +108,10 @@ internal sealed class TvFocus
         {
             up = -up;
         }
-        Quaternion rotation = Quaternion.LookRotation(-normal, up);
-        Vector3 right = rotation * Vector3.right;
-        float halfHeight = Mathf.Abs(Vector3.Dot(across, up)) + Mathf.Abs(Vector3.Dot(along, up));
-        float halfWidth = Mathf.Abs(Vector3.Dot(across, right)) + Mathf.Abs(Vector3.Dot(along, right));
-        const float fieldOfView = 55f;
         float aspect = Mathf.Max(0.5f, (float)Screen.width / Mathf.Max(1, Screen.height));
-        float verticalTangent = Mathf.Tan(fieldOfView * Mathf.Deg2Rad * 0.5f);
-        float required = 1.20f * Mathf.Max(halfHeight / verticalTangent, halfWidth / (verticalTangent * aspect));
         float scale = FlatPhysics.Scale(player);
-        float distance = Mathf.Max(required, 0.19f * scale);
-        foreach (var obstruction in Physics.RaycastAll(center + normal * (0.015f * scale), normal, distance,
-            Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
-        {
-            if (obstruction.collider == null || FlatPhysics.OwnCollider(player, obstruction.collider) ||
-                screen.Contains(obstruction.collider))
-            {
-                continue;
-            }
-            distance = Mathf.Min(distance, obstruction.distance - 0.06f * scale);
-        }
-        if (distance < required * 0.75f || distance < 0.09f * scale)
-        {
-            return null;
-        }
+        PlaceView(screen, player, eye.transform.position, screenHit.point, center, normal, up, across, along, aspect, scale,
+            out Vector3 viewPosition, out Quaternion rotation, out float fieldOfView);
 
         var focusObject = new GameObject("FlatRat TV view");
         focusObject.SetActive(false);
@@ -144,14 +130,14 @@ internal sealed class TvFocus
             camera.ResetWorldToCameraMatrix();
             camera.ResetCullingMatrix();
             camera.depth = eye.depth + 100f;
-            camera.nearClipPlane = Mathf.Min(eye.nearClipPlane, 0.04f * scale);
+            camera.nearClipPlane = Mathf.Min(eye.nearClipPlane, Mathf.Clamp(0.012f * scale, 0.003f, 0.025f));
             var from = eye.GetUniversalAdditionalCameraData();
             var to = camera.GetUniversalAdditionalCameraData();
             to.renderPostProcessing = from.renderPostProcessing;
             to.antialiasing = from.antialiasing;
             to.volumeLayerMask = from.volumeLayerMask;
             to.allowXRRendering = false;
-            camera.transform.SetPositionAndRotation(center + normal * distance, rotation);
+            camera.transform.SetPositionAndRotation(viewPosition, rotation);
             focusObject.SetActive(true);
             return new TvFocus(screen, eye, camera, globals, player);
         }
@@ -162,6 +148,76 @@ internal sealed class TvFocus
         }
     }
 
+    private static void PlaceView(TvScreen screen, Player player, Vector3 eye, Vector3 aimedAt,
+        Vector3 center, Vector3 normal, Vector3 up, Vector3 across, Vector3 along, float aspect, float scale,
+        out Vector3 position, out Quaternion rotation, out float fieldOfView)
+    {
+        const float normalFov = 55f;
+        const float widestFov = 100f;
+        var corners = new[] { center + across + along, center + across - along, center - across + along, center - across - along };
+        Vector3 right = Vector3.Cross(up, normal).normalized;
+        float halfHeight = Mathf.Abs(Vector3.Dot(across, up)) + Mathf.Abs(Vector3.Dot(along, up));
+        float halfWidth = Mathf.Abs(Vector3.Dot(across, right)) + Mathf.Abs(Vector3.Dot(along, right));
+        float idealDistance = Mathf.Max(0.14f * scale, 1.12f * Mathf.Max(halfHeight, halfWidth / aspect) /
+            Mathf.Tan(normalFov * Mathf.Deg2Rad * 0.5f));
+
+        // Prefer a centered view. In tight rooms progressively use the player's
+        // approach angle and widen the lens to fit the screen at the available distance.
+        Vector3 approach = (eye - center).normalized;
+        float inset = Mathf.Max(0.003f, 0.01f * scale);
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            Vector3 direction = Vector3.Lerp(normal, approach, attempt / 3f).normalized;
+            float distance = idealDistance;
+            foreach (var hit in Physics.RaycastAll(center + direction * inset, direction, idealDistance,
+                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                if (hit.collider != null && !FlatPhysics.OwnCollider(player, hit.collider) && !screen.Contains(hit.collider))
+                {
+                    distance = Mathf.Min(distance, hit.distance + inset - 0.035f * scale);
+                }
+            }
+            if (distance < Mathf.Max(0.025f, 0.055f * scale)) continue;
+
+            position = center + direction * distance;
+            rotation = Quaternion.LookRotation(center - position, up);
+            float required = ScreenFieldOfView(corners, position, rotation, aspect);
+            if (required <= widestFov &&
+                screen.Mesh.Raycast(new Ray(position, rotation * Vector3.forward), out _, distance + inset))
+            {
+                fieldOfView = Mathf.Max(normalFov, required);
+                return;
+            }
+        }
+
+        // The player's aim already passed the reach and occlusion checks.
+        // Keep that position when the room offers no clear spot in front.
+        position = eye;
+        Vector3 toward = (center - eye).normalized;
+        if (!screen.Mesh.Raycast(new Ray(eye, toward), out _, Vector3.Distance(eye, center) + inset) ||
+            Physics.RaycastAll(eye, toward, Vector3.Distance(eye, center), Physics.DefaultRaycastLayers,
+                QueryTriggerInteraction.Ignore).Any(hit => hit.collider != null &&
+                    !FlatPhysics.OwnCollider(player, hit.collider) && !screen.Contains(hit.collider)))
+        {
+            toward = aimedAt - eye;
+        }
+        rotation = Quaternion.LookRotation(toward, up);
+        fieldOfView = Mathf.Clamp(ScreenFieldOfView(corners, position, rotation, aspect), normalFov, widestFov);
+    }
+
+    private static float ScreenFieldOfView(Vector3[] corners, Vector3 position, Quaternion rotation, float aspect)
+    {
+        Quaternion inverse = Quaternion.Inverse(rotation);
+        float tangent = 0f;
+        foreach (var corner in corners)
+        {
+            Vector3 cameraPoint = inverse * (corner - position);
+            if (cameraPoint.z <= 0.001f) return 179f;
+            tangent = Mathf.Max(tangent, Mathf.Max(Mathf.Abs(cameraPoint.y), Mathf.Abs(cameraPoint.x) / aspect) / cameraPoint.z);
+        }
+        return 2f * Mathf.Atan(1.12f * tangent) * Mathf.Rad2Deg;
+    }
+
     internal bool Update(Keyboard keyboard, Mouse mouse)
     {
         if (!screen.Active || screen.Mesh == null || renderCamera == null || view == null || eye == null)
@@ -169,10 +225,7 @@ internal sealed class TvFocus
             return false;
         }
 
-        if (!renderCamera.enabled)
-        {
-            renderCamera.enabled = true;
-        }
+        KeepRendering();
         var ray = view.ScreenPointToRay(mouse.position.ReadValue());
         if (screen.Mesh.Raycast(ray, out var hit, view.farClipPlane))
         {
@@ -186,12 +239,17 @@ internal sealed class TvFocus
         return true;
     }
 
+    internal void KeepRendering()
+    {
+        if (renderCamera != null && !renderCamera.enabled) renderCamera.enabled = true;
+    }
+
     internal void Close()
     {
         try
         {
-            try { keyboardInput.Close(); }
-            finally { pointer.Close(); }
+            try { keyboardInput?.Close(); }
+            finally { pointer?.Close(); }
         }
         finally
         {
@@ -227,10 +285,10 @@ internal sealed class TvPointer
     private GameObject hover;
     private bool hasPosition;
 
-    internal TvPointer(TvScreen screen)
+    internal TvPointer(TvScreen screen, EventSystem events)
     {
         this.screen = screen;
-        events = EventSystem.current;
+        this.events = events;
         data = new PointerEventData(events) { pointerId = -1, button = PointerEventData.InputButton.Left };
         inputModule = events.currentInputModule;
         if (inputModule != null)

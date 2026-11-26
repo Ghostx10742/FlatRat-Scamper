@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>FlatRat-Scamper</AssemblyName>
     <RootNamespace>FlatRatScamper</RootNamespace>
-    <Version>0.1.4</Version>
+    <Version>0.1.5</Version>
     <Authors>J_axon</Authors>
     <Company>J_axon</Company>
     <GameDir Condition="'$(GameDir)' == ''">$(SCAMPER_GAME_DIR)</GameDir>

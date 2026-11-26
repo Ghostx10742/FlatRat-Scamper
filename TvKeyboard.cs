@@ -13,11 +13,16 @@ namespace FlatRatScamper;
 internal sealed class TvKeyboard
 {
     private readonly TvScreen screen;
+    private readonly EventSystem events;
     private Keyboard device;
     private TextInputAction textInput;
     private float nextBackspace = float.PositiveInfinity;
 
-    internal TvKeyboard(TvScreen screen) => this.screen = screen;
+    internal TvKeyboard(TvScreen screen, EventSystem events)
+    {
+        this.screen = screen;
+        this.events = events;
+    }
 
     internal bool IsTyping => Keypad != null || SelectedField != null;
 
@@ -36,7 +41,6 @@ internal sealed class TvKeyboard
     {
         get
         {
-            var events = EventSystem.current;
             var selected = events != null ? events.currentSelectedGameObject : null;
             if (selected == null || screen.Canvas == null || !selected.transform.IsChildOf(screen.Canvas) ||
                 !screen.Allows(selected.transform))

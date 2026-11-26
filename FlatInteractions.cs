@@ -8,6 +8,7 @@ namespace FlatRatScamper;
 internal sealed class FlatInteractions
 {
     private const float ClimbSeconds = 3f;
+    private const float TvReach = 1.35f;
     private TvFocus focus;
     private ButtonPress press;
     private List<TvScreen> monitors = new();
@@ -21,6 +22,8 @@ internal sealed class FlatInteractions
     internal bool Focused => focus != null;
     internal bool Typing => focus?.IsTyping == true;
     internal bool Climbing => climbing != null;
+
+    internal void KeepFocusedScreenRendering() => focus?.KeepRendering();
 
     internal void UpdateFocus(Keyboard keyboard, Mouse mouse)
     {
@@ -45,18 +48,19 @@ internal sealed class FlatInteractions
         prompt = null;
         float scale = FlatPhysics.Scale(player);
         Ray aim = eye.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
-        float maxReach = 2.8f * scale;
+        float maxReach = 1.8f * scale;
+        float tvReach = Mathf.Min(TvReach * scale, 1.55f);
         RaycastHit? visible = ClosestVisibleHit(aim, player, maxReach);
-        if (TryFindTv(aim, visible, maxReach, scale, out var monitor))
+        if (TryFindTv(aim, visible, tvReach, scale, out var monitor, out var screenHit))
         {
             CancelClimb();
             prompt = "E  Interact with TV";
             if (keyboard.eKey.wasPressedThisFrame)
             {
                 ReleaseButton();
-                try { focus = TvFocus.TryOpen(monitor, eye, globals, player); }
+                try { focus = TvFocus.TryOpen(monitor, screenHit, eye, globals, player); }
                 catch (Exception ex) { Plugin.Logger.LogWarning("Could not open TV focus: " + ex); }
-                if (focus == null) ShowStatus("Unable to focus this TV from here");
+                if (focus == null) ShowStatus("TV controls unavailable");
             }
             return;
         }
@@ -110,7 +114,7 @@ internal sealed class FlatInteractions
     }
 
     private bool TryFindTv(Ray ray, RaycastHit? front, float maxReach, float scale,
-        out TvScreen monitor)
+        out TvScreen monitor, out RaycastHit surfaceHit)
     {
         if (Time.unscaledTime >= nextMonitorSearch)
         {
@@ -119,6 +123,7 @@ internal sealed class FlatInteractions
         }
 
         monitor = null;
+        surfaceHit = default;
         foreach (var screen in monitors)
         {
             if (!screen.Active || screen.Mesh == null || !screen.Mesh.Raycast(ray, out var hit, maxReach))
@@ -131,6 +136,7 @@ internal sealed class FlatInteractions
                 continue;
             }
             monitor = screen;
+            surfaceHit = hit;
             maxReach = hit.distance;
         }
         return monitor != null;
@@ -218,7 +224,7 @@ internal sealed class FlatInteractions
         statusUntil = Time.unscaledTime + 2f;
     }
 
-    internal void DrawHud()
+    internal void DrawHud(float? stamina)
     {
         if (Event.current.type != EventType.Repaint)
         {
@@ -242,6 +248,13 @@ internal sealed class FlatInteractions
         GUI.DrawTexture(new Rect(x - 3f, y - 3f, 6f, 6f), Texture2D.whiteTexture);
         GUI.color = Color.white;
         GUI.DrawTexture(new Rect(x - 1f, y - 1f, 2f, 2f), Texture2D.whiteTexture);
+        if (stamina is float fraction)
+        {
+            GUI.color = new Color(0f, 0f, 0f, 0.72f);
+            GUI.DrawTexture(new Rect(x - 19f, y + 7f, 38f, 5f), Texture2D.whiteTexture);
+            GUI.color = new Color(0.58f, 0.94f, 0.85f, 0.95f);
+            GUI.DrawTexture(new Rect(x - 18f, y + 8f, 36f * fraction, 3f), Texture2D.whiteTexture);
+        }
         if (status != null && Time.unscaledTime < statusUntil)
         {
             DrawLabel(new Rect(x - 170f, y + 26f, 340f, 32f), status);

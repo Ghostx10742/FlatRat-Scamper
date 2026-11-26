@@ -9,6 +9,9 @@ internal sealed class TvScreen
 {
     private readonly MonitorScreenBase monitor;
     private readonly PodiumMonitorScreen podium;
+    private Camera screenCamera;
+    private RectTransform screenCanvas;
+    private MonitorScreenBase mirroredMonitor;
 
     private TvScreen(MonitorScreenBase monitor) => this.monitor = monitor;
     private TvScreen(PodiumMonitorScreen podium) => this.podium = podium;
@@ -16,19 +19,20 @@ internal sealed class TvScreen
     private Behaviour Owner => monitor != null ? monitor : podium;
     internal bool Active => Owner != null && Owner.isActiveAndEnabled;
     internal MeshCollider Mesh => monitor != null ? monitor.tvMesh : podium.tvMesh;
-    internal Camera RenderCamera => monitor != null ? monitor.renderCamera : podium.renderCamera;
-    internal RectTransform Canvas => monitor != null ? monitor.canvasRectTransform : podium.canvasRectTransform;
+    internal Camera RenderCamera => screenCamera;
+    internal RectTransform Canvas => screenCanvas;
     internal MainUIHandler MainMenu
     {
         get
         {
-            var full = monitor == null ? null : monitor.TryCast<MonitorScreen>();
+            var full = ControlMonitor?.TryCast<MonitorScreen>();
             return full != null ? full.mainUIHandler : null;
         }
     }
     internal Vector2 ScreenSize => monitor != null ? monitor.screen_size : podium.screen_size;
     internal Vector2 RemapX => monitor != null ? monitor.remapUVx : podium.remapUVx;
     internal Vector2 RemapY => monitor != null ? monitor.remapUVy : podium.remapUVy;
+    private MonitorScreenBase ControlMonitor => monitor != null ? monitor : mirroredMonitor;
 
     internal static List<TvScreen> FindActiveScreens()
     {
@@ -55,16 +59,63 @@ internal sealed class TvScreen
         if (podium != null)
         {
             podium.TryRefreshBindings();
+            screenCamera = podium.renderCamera != null ? podium.renderCamera : podium.fallbackMonitorCamera;
+            screenCanvas = podium.canvasRectTransform != null ? podium.canvasRectTransform : podium.fallbackMonitorCanvas;
+            if (screenCamera == null && screenCanvas == null) BindMirroredScreen();
         }
-        if (Mesh == null || !Mesh.enabled || RenderCamera == null || Canvas == null)
+        else
         {
+            screenCamera = monitor.renderCamera;
+            screenCanvas = monitor.canvasRectTransform;
+        }
+
+        if (screenCanvas == null && screenCamera != null)
+        {
+            var canvas = screenCamera.GetComponentInChildren<Canvas>(true);
+            if (canvas != null) screenCanvas = canvas.transform.TryCast<RectTransform>();
+        }
+        if (screenCamera == null && screenCanvas != null)
+        {
+            var canvas = screenCanvas.GetComponent<Canvas>();
+            if (canvas != null) screenCamera = canvas.worldCamera;
+        }
+        if (Mesh == null || !Mesh.enabled || screenCamera == null || screenCanvas == null)
+        {
+            Plugin.Logger.LogWarning($"TV {Owner.name} has incomplete bindings (camera={screenCamera != null}, canvas={screenCanvas != null}).");
             return false;
         }
-        if (monitor != null)
-        {
-            monitor.RefreshUIControls();
-        }
+        ControlMonitor?.RefreshUIControls();
         return true;
+    }
+
+    private void BindMirroredScreen()
+    {
+        // Some map screens display the render texture supplied by another TV.
+        // Only use its controls when the displayed texture actually matches.
+        var renderer = podium.screenMeshRenderer;
+        if (renderer == null && Mesh != null) renderer = Mesh.GetComponent<MeshRenderer>();
+        var material = renderer == null ? null : renderer.sharedMaterial;
+        if (material == null || !material.HasProperty("_RenderTexture")) return;
+        var texture = material.GetTexture("_RenderTexture");
+        if (texture == null) return;
+
+        foreach (var candidate in Object.FindObjectsOfType<MonitorScreenBase>())
+        {
+            if (candidate.renderCamera == null || candidate.renderCamera.targetTexture != texture ||
+                candidate.canvasRectTransform == null) continue;
+            mirroredMonitor = candidate;
+            screenCamera = candidate.renderCamera;
+            screenCanvas = candidate.canvasRectTransform;
+            return;
+        }
+        foreach (var candidate in Object.FindObjectsOfType<PodiumMonitorScreen>())
+        {
+            if (candidate == podium || !candidate.TryRefreshBindings() || candidate.renderCamera == null ||
+                candidate.renderCamera.targetTexture != texture || candidate.canvasRectTransform == null) continue;
+            screenCamera = candidate.renderCamera;
+            screenCanvas = candidate.canvasRectTransform;
+            return;
+        }
     }
 
     internal bool Contains(Collider collider)
@@ -84,13 +135,18 @@ internal sealed class TvScreen
         return full != null && (collider == full.monitor || collider == full.frame);
     }
 
-    internal bool Allows(Transform target) => monitor == null || monitor.IsAllowedByModal(target);
+    internal bool Allows(Transform target)
+    {
+        var controls = ControlMonitor;
+        return controls == null || controls.IsAllowedByModal(target);
+    }
 
     internal Selectable FindControl(Vector2 point)
     {
-        if (monitor != null)
+        var nativeControls = ControlMonitor;
+        if (nativeControls != null)
         {
-            return monitor.FindTouchedControl(point, point);
+            return nativeControls.FindTouchedControl(point, point);
         }
 
         // The podium variant has no common hit-test API. Use its native canvas

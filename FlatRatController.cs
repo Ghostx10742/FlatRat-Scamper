@@ -22,9 +22,10 @@ public sealed class FlatRatController : MonoBehaviour
     private Camera eye;
     private Transform leftHand, rightHand;
     private Vector3 eyeRestPosition;
-    private Quaternion eyeRestRotation, leftWrist, rightWrist;
-    private Vector3 leftOffset, rightOffset;
-    private float pitch, viewYawOffset;
+    private Quaternion eyeRestRotation;
+    private DesktopHands hands;
+    private readonly SprintStamina stamina = new();
+    private float pitch, viewYawOffset, crouch;
     private bool physical, sprint, jumpQueued, xrStopped, cursorOwned, captureLook;
     private Vector2 walk;
     private CursorLockMode previousCursorLock;
@@ -36,9 +37,11 @@ public sealed class FlatRatController : MonoBehaviour
 
     public FlatRatController(IntPtr pointer) : base(pointer) { }
 
-    internal HandLocomotionRole HandRole => physical && !interactions.Focused && !interactions.Climbing
-        ? HandLocomotionRole.Controller
-        : HandLocomotionRole.Unavailable;
+    internal HandLocomotionRole HandRole(HandTrackingFeature hand) =>
+        physical && captureLook && Application.isFocused && CanMoveBody && !interactions.Focused &&
+        !interactions.Climbing && hands?.IsDriving(hand) == true
+            ? HandLocomotionRole.Controller
+            : HandLocomotionRole.Unavailable;
 
     internal bool Owns(Player candidate) => player != null && player == candidate && !failed;
 
@@ -56,7 +59,17 @@ public sealed class FlatRatController : MonoBehaviour
 
         try
         {
-            UpdateDesktop();
+            var keyboard = Keyboard.current;
+            UpdateDesktop(keyboard);
+            bool shiftHeld = !physical && Application.isFocused && keyboard != null &&
+                (keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed);
+            sprint = stamina.Update(shiftHeld, walk.sqrMagnitude > 0.001f, Time.deltaTime);
+            if (!captureLook || !Application.isFocused || !CanMoveBody || interactions.Focused || interactions.Climbing)
+            {
+                hands?.CancelDrag();
+            }
+            float targetCrouch = physical ? hands?.Crouch ?? 0f : 0f;
+            crouch = Mathf.MoveTowards(crouch, targetCrouch, 5f * Time.deltaTime);
             ApplyCursor(Application.isFocused);
         }
         catch (Exception ex)
@@ -78,9 +91,8 @@ public sealed class FlatRatController : MonoBehaviour
         catch (Exception cleanup) { Plugin.Logger.LogWarning("Desktop state cleanup failed: " + cleanup); }
     }
 
-    private void UpdateDesktop()
+    private void UpdateDesktop(Keyboard keyboard)
     {
-        var keyboard = Keyboard.current;
         if (interactions.Focused && keyboard != null &&
             (keyboard.escapeKey.wasPressedThisFrame || (keyboard.eKey.wasPressedThisFrame && !interactions.Typing)))
         {
@@ -119,6 +131,7 @@ public sealed class FlatRatController : MonoBehaviour
         if (keyboard == null || mouse == null)
         {
             ResetInput();
+            hands.CancelDrag();
             return;
         }
 
@@ -150,7 +163,7 @@ public sealed class FlatRatController : MonoBehaviour
             }
             captureLook = true;
         }
-        ReadLook(mouse);
+        if (!hands.ReadDrag(mouse, keyboard, physical)) ReadLook(mouse);
         ApplyTrackedPose();
         interactions.UpdateAim(globals!, player!, eye!, keyboard);
         bool canWalk = !physical && !interactions.Focused && !interactions.Climbing && CanMoveBody && !player.disablePhysics;
@@ -159,7 +172,6 @@ public sealed class FlatRatController : MonoBehaviour
             walk = Vector2.ClampMagnitude(new Vector2(
                 Axis(keyboard.dKey.isPressed, keyboard.aKey.isPressed),
                 Axis(keyboard.wKey.isPressed, keyboard.sKey.isPressed)), 1f);
-            sprint = keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed;
             jumpQueued |= keyboard.spaceKey.wasPressedThisFrame;
         }
         else
@@ -209,10 +221,11 @@ public sealed class FlatRatController : MonoBehaviour
             eyeRestPosition.y = Mathf.Clamp(Plugin.StandingEyeHeight.Value, 0.65f, 2.2f);
         }
         eyeRestRotation = eyeTransform.localRotation;
-        pitch = viewYawOffset = 0f;
+        pitch = viewYawOffset = crouch = 0f;
         eyeRendering = eye.GetUniversalAdditionalCameraData();
         previousAllowXr = eyeRendering.allowXRRendering;
         eyeRendering.allowXRRendering = false;
+        hands = new DesktopHands(player);
 
         var avatar = local.player != null ? local.player : player.gameObject;
         foreach (var driver in avatar.GetComponentsInChildren<LegacyPoseDriver>(true))
@@ -232,10 +245,6 @@ public sealed class FlatRatController : MonoBehaviour
             }
         }
 
-        var yaw = Quaternion.Euler(0f, player.transform.eulerAngles.y, 0f);
-        leftWrist = Quaternion.Inverse(yaw) * leftHand.rotation;
-        rightWrist = Quaternion.Inverse(yaw) * rightHand.rotation;
-        ResetHandOffsets();
         previousCursorLock = Cursor.lockState;
         previousCursorVisible = Cursor.visible;
         cursorOwned = true;
@@ -255,7 +264,8 @@ public sealed class FlatRatController : MonoBehaviour
 
     private bool DrivesPose(Transform node) =>
         eye!.transform == node || leftHand == node || rightHand == node ||
-        eye.transform.IsChildOf(node) || leftHand!.IsChildOf(node) || rightHand!.IsChildOf(node);
+        eye.transform.IsChildOf(node) || leftHand!.IsChildOf(node) || rightHand!.IsChildOf(node) ||
+        hands?.Tracks(node) == true;
 
     private void SetMovementMode(bool handMovement)
     {
@@ -266,34 +276,18 @@ public sealed class FlatRatController : MonoBehaviour
 
         physical = handMovement;
         ResetInput();
-        ResetHandOffsets();
+        hands.Reset();
+        crouch = 0f;
         player!.ForceReleaseClimbingHands();
         player.ClearHandMovementAnchors();
         ApplyTrackedPose();
         player.ResetSavedTransforms();
-        interactions.ShowStatus(physical ? "Physical hand movement" : "Keyboard movement");
-    }
-
-    private void ResetHandOffsets()
-    {
-        leftOffset = new Vector3(-0.20f, -0.29f, 0.37f);
-        rightOffset = new Vector3(0.20f, -0.29f, 0.37f);
+        interactions.ShowStatus(physical ? "Hold a mouse button to reach. Add Shift for height." : "Keyboard movement");
     }
 
     private void ReadLook(Mouse mouse)
     {
         Vector2 delta = mouse.delta.ReadValue();
-        bool left = physical && mouse.leftButton.isPressed;
-        bool right = physical && mouse.rightButton.isPressed;
-        if (left || right)
-        {
-            Vector3 movement = new(delta.x * 0.0018f, delta.y * 0.0018f,
-                Mathf.Clamp(mouse.scroll.ReadValue().y * 0.00035f, -0.12f, 0.12f));
-            if (left) leftOffset = MoveHand(leftOffset, movement);
-            if (right) rightOffset = MoveHand(rightOffset, movement);
-            return;
-        }
-
         float sensitivity = Mathf.Clamp(Plugin.MouseSensitivity.Value, 0.01f, 1f);
         float requestedYaw = Mathf.DeltaAngle(0f, viewYawOffset + delta.x * sensitivity);
         if (CanMoveBody && Mathf.Abs(requestedYaw) > 0.0001f)
@@ -309,13 +303,6 @@ public sealed class FlatRatController : MonoBehaviour
         pitch = Mathf.Clamp(pitch - delta.y * sensitivity, -89f, 89f);
     }
 
-    private Vector3 MoveHand(Vector3 previous, Vector3 movement)
-    {
-        Vector3 target = previous + movement;
-        target.z = Mathf.Clamp(target.z, -0.34f, 0.85f);
-        return Vector3.ClampMagnitude(target, Mathf.Clamp(player!.maxArmLength, 0.45f, 1.15f));
-    }
-
     private void ApplyTrackedPose()
     {
         if (!CanLook || interactions.Focused)
@@ -324,21 +311,20 @@ public sealed class FlatRatController : MonoBehaviour
         }
 
         Transform head = eye!.transform;
-        head.localPosition = eyeRestPosition;
+        Vector3 headPosition = eyeRestPosition;
+        // Reaching low in F2 lowers the tracked head like crouching in VR, so
+        // the native arm-length limit still allows pushing against the floor.
+        headPosition.y = Mathf.Lerp(eyeRestPosition.y, Mathf.Min(eyeRestPosition.y, 0.55f), crouch);
+        head.localPosition = headPosition;
         head.localRotation = eyeRestRotation * Quaternion.Euler(pitch, 0f, 0f);
         if (Mathf.Abs(viewYawOffset) > 0.0001f)
         {
             head.rotation = Quaternion.AngleAxis(viewYawOffset, Vector3.up) * head.rotation;
         }
-        if (!CanMoveBody || leftHand == null || rightHand == null)
+        if (CanMoveBody)
         {
-            return;
+            hands?.Apply(head, physical);
         }
-        Quaternion yaw = Quaternion.Euler(0f, player!.transform.eulerAngles.y, 0f);
-        Quaternion basis = physical ? yaw : head.rotation;
-        float scale = FlatPhysics.Scale(player);
-        leftHand!.SetPositionAndRotation(head.position + basis * (leftOffset * scale), basis * leftWrist);
-        rightHand!.SetPositionAndRotation(head.position + basis * (rightOffset * scale), basis * rightWrist);
     }
 
     internal void BeforeNativePhysics() => ApplyTrackedPose();
@@ -376,6 +362,7 @@ public sealed class FlatRatController : MonoBehaviour
             try
             {
                 ApplyTrackedPose();
+                interactions.KeepFocusedScreenRendering();
                 ApplyCursor(Application.isFocused);
             }
             catch (Exception ex) { HandleFailure(ex); }
@@ -386,7 +373,7 @@ public sealed class FlatRatController : MonoBehaviour
     {
         if (!failed && eye != null && Application.isFocused)
         {
-            interactions.DrawHud();
+            interactions.DrawHud(physical ? null : stamina.Fraction);
         }
     }
 
@@ -401,6 +388,7 @@ public sealed class FlatRatController : MonoBehaviour
         if (!focused)
         {
             ResetInput();
+            hands?.CancelDrag();
             interactions.Interrupt();
         }
         ApplyCursor(focused);
@@ -452,6 +440,7 @@ public sealed class FlatRatController : MonoBehaviour
         eye = null;
         eyeRendering = null;
         leftHand = rightHand = null;
+        hands = null;
     }
 
     private void ApplyCursor(bool focused)

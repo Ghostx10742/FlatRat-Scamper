@@ -21,12 +21,14 @@ Close Scamper and copy `FlatRat-Scamper.dll` into `Scamper/BepInEx/plugins`. Rep
 | F1 | Select keyboard movement. Your hands follow your view. |
 | WASD, Shift, Space | Walk, sprint, and jump in keyboard movement mode. |
 | F2 | Select physical hand movement. Your hands follow your body's turn and stay level when you look up or down. |
-| Hold left or right mouse button in F2 | Move that hand with the mouse. Scroll to adjust reach. Release the button to look around again. |
+| Hold left or right mouse button in F2 | Move that hand sideways or forward and back. Hold Shift while dragging to raise or lower it, and scroll to adjust reach. Reach down to crouch and plant a hand on the floor. Release the mouse button to look around again. |
 | Esc during gameplay | Show the cursor within the game window. Left-click to resume mouse look. |
+
+In F1, the bar under the reticle shows sprint stamina. A full bar gives you 10 seconds. After 2 seconds without Shift, it refills over 3 seconds. You can sprint again with the stamina you've recovered.
 
 ## Interactions
 
-- **TVs.** Press **E** at a lobby, gameplay, or podium TV to center the view, hold still, and hide your rat model. Use the mouse to click, drag, or scroll. Text fields and the code keypad accept letters, numbers, and **Backspace**. **Space** is ignored while typing. Press **Esc** to exit.
+- **TVs.** Step close to a lobby, gameplay, or podium TV and press **E** to focus it. Use the mouse to click, drag, or scroll. Text fields and the code keypad accept letters, numbers, and **Backspace**. **Space** is ignored while typing. Press **Esc** to exit.
 - **Switches.** Aim at a supported button and press **E** to run its normal action, such as opening a door or starting a round.
 - **Ladders.** Aim at a ladder and hold **E** until the three-second progress ring fills to climb to a clear landing at the top.
 
