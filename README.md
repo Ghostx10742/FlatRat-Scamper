@@ -38,7 +38,7 @@ FlatRat uses Scamper's normal body and hand pose synchronization. Multiplayer wi
 
 ## Configuration
 
-Adjust mouse sensitivity, eye height, walk and sprint speed, or jump height in `BepInEx/config/jaxon.flatrat.scamper.cfg`. Set `Enabled = false` and restart to return to VR. For loading errors, check `BepInEx/LogOutput.log`.
+Adjust mouse sensitivity, walk and sprint speed, or jump height in `BepInEx/config/jaxon.flatrat.scamper.cfg`. Set `Enabled = false` and restart to return to VR. For loading errors, check `BepInEx/LogOutput.log`.
 
 ## Build from source
 
