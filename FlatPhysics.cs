@@ -33,24 +33,39 @@ internal static class FlatPhysics
         return shoulder + direction * distance;
     }
 
-    internal static Vector3 KeepHandAboveFloor(Player player, Vector3 eye, Vector3 target, float scale)
+    internal static bool TryHandFloor(Player player, Vector3 head, Vector3 reachPoint, float scale, out RaycastHit floor)
     {
-        if (target.y >= eye.y) return target;
-
-        float clearance = 0.025f * scale;
-        var origin = new Vector3(target.x, eye.y, target.z);
+        floor = default;
+        float inset = 0.08f * scale;
+        Vector3 origin = new(reachPoint.x, head.y + inset, reachPoint.z);
+        float drop = player.GetScaleAwareMaxArmLength(Vector3.down);
         handHits ??= new Il2CppStructArray<RaycastHit>(24);
-        int hits = Physics.RaycastNonAlloc(origin, Vector3.down, handHits, eye.y - target.y + clearance,
+        int hits = Physics.RaycastNonAlloc(origin, Vector3.down, handHits, drop + inset,
+            WorldMask(player), QueryTriggerInteraction.Ignore);
+        float nearest = float.PositiveInfinity;
+        for (int index = 0; index < hits; index++)
+        {
+            var hit = handHits[index];
+            if (hit.distance >= nearest || hit.normal.y < 0.55f || hit.collider == null ||
+                OwnCollider(player, hit.collider)) continue;
+            nearest = hit.distance;
+            floor = hit;
+        }
+        if (nearest == float.PositiveInfinity) return false;
+
+        Vector3 towardFloor = floor.point - head;
+        if (towardFloor.magnitude > player.GetScaleAwareMaxArmLength(towardFloor)) return false;
+
+        // A ledge can be under the cursor's hand target while a wall blocks the reach.
+        Vector3 path = floor.point + floor.normal * (0.045f * scale) - head;
+        hits = Physics.RaycastNonAlloc(head, path.normalized, handHits, path.magnitude,
             WorldMask(player), QueryTriggerInteraction.Ignore);
         for (int index = 0; index < hits; index++)
         {
             var hit = handHits[index];
-            if (hit.normal.y >= 0.55f && hit.collider != null && !OwnCollider(player, hit.collider))
-            {
-                target.y = Mathf.Max(target.y, hit.point.y + clearance);
-            }
+            if (hit.collider != null && !OwnCollider(player, hit.collider)) return false;
         }
-        return target;
+        return true;
     }
 
     internal static void Walk(Player player, Vector2 movement, bool sprint, bool jump)

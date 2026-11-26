@@ -21,7 +21,7 @@ Close Scamper and copy `FlatRat-Scamper.dll` into `Scamper/BepInEx/plugins`. Rep
 | F1 | Select keyboard movement. Your hands follow your view. |
 | WASD, Shift, Space | Walk, sprint, and jump in keyboard movement mode. |
 | F2 | Select physical hand movement. Your hands follow your body's turn and stay level when you look up or down. |
-| Hold left or right mouse button in F2 | Move that hand sideways or forward and back. Hold Shift while dragging to raise or lower it, and scroll to adjust reach. Reach down to crouch and plant a hand on the floor. Release the mouse button to look around again. |
+| Hold left or right mouse button in F2 | Plant that hand on the floor within reach. Drag the mouse back to pull yourself forward, forward to push back, or sideways to turn the stroke. Hold Shift while dragging to lift or lower the hand. Scroll to adjust reach. Release the mouse button to look around again. |
 | Esc during gameplay | Show the cursor within the game window. Left-click to resume mouse look. |
 
 In F1, the bar under the reticle shows sprint stamina. A full bar gives you 10 seconds. After 2 seconds without Shift, it refills over 3 seconds. You can sprint again with the stamina you've recovered.

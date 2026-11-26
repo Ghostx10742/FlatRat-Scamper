@@ -9,7 +9,6 @@ internal sealed class DesktopHands
 {
     private readonly Player player;
     private readonly Hand left, right;
-    private float reach;
 
     internal DesktopHands(Player player)
     {
@@ -31,7 +30,7 @@ internal sealed class DesktopHands
             heightMode ? delta.y * 0.0035f : 0f,
             (heightMode ? 0f : delta.y * 0.0045f) + wheel);
 
-        reach = Mathf.Clamp(player.maxArmLength, 0.5f, 1.15f);
+        float reach = Mathf.Clamp(player.maxArmLength * 0.7f, 0.45f, 0.85f);
         left.UpdateDrag(leftDrag, motion, reach);
         right.UpdateDrag(rightDrag, motion, reach);
         return leftDrag || rightDrag;
@@ -41,27 +40,13 @@ internal sealed class DesktopHands
         hand != null && ((left.Dragging && left.Device == hand) || (right.Dragging && right.Device == hand));
 
     internal bool Tracks(Transform source) => left.Tracks(source) || right.Tracks(source);
-    internal float Crouch
-    {
-        get
-        {
-            float lowest = Mathf.Min(left.Dragging ? left.Offset.y : 0f, right.Dragging ? right.Offset.y : 0f);
-            return Mathf.InverseLerp(0.22f, Mathf.Max(0.3f, 0.65f * reach), -lowest);
-        }
-    }
-
-    internal void CancelDrag()
-    {
-        left.Dragging = right.Dragging = false;
-    }
-
     internal void Reset()
     {
         left.Reset();
         right.Reset();
     }
 
-    internal void Apply(Transform eye, bool physical)
+    internal void Apply(Transform eye, bool physical, bool forPhysics)
     {
         float scale = FlatPhysics.Scale(player);
         Quaternion yaw = Quaternion.Euler(0f, player.transform.eulerAngles.y, 0f);
@@ -70,23 +55,44 @@ internal sealed class DesktopHands
         var velocity = body != null ? body.linearVelocity : Vector3.zero;
         float stride = physical ? 0f : Mathf.Clamp01(new Vector2(velocity.x, velocity.z).magnitude / (2.4f * scale));
         float swing = Mathf.Sin(Time.time * 10f) * stride;
-        Apply(left, eye.position, basis, yaw, scale, swing, physical);
-        Apply(right, eye.position, basis, yaw, scale, -swing, physical);
+        var headCollider = physical ? player.headCollider : null;
+        Vector3 head = headCollider != null ? headCollider.transform.position : eye.position;
+        Apply(left, eye.position, head, basis, yaw, scale, swing, physical, forPhysics);
+        Apply(right, eye.position, head, basis, yaw, scale, -swing, physical, forPhysics);
     }
 
-    private void Apply(Hand hand, Vector3 eye, Quaternion basis, Quaternion yaw, float scale, float swing, bool physical)
+    private void Apply(Hand hand, Vector3 eye, Vector3 head, Quaternion basis, Quaternion yaw, float scale, float swing,
+        bool physical, bool forPhysics)
     {
-        bool pushing = physical && hand.Dragging;
-        Vector3 offset = physical ? hand.Offset : hand.Rest + new Vector3(0f, 0.025f * swing, 0.055f * swing);
-        Vector3 anchor = eye + yaw * (new Vector3(hand.Rest.x, -0.12f, 0.02f) * scale);
-        Vector3 target = eye + basis * (offset * scale);
+        Quaternion rotation = basis * hand.Wrist;
+        if (physical && hand.Dragging)
+        {
+            Vector3 reachPoint = head + yaw * (new Vector3(hand.Offset.x, 0f, hand.Offset.z) * scale);
+            float lift = hand.Offset.y * scale;
+            if (FlatPhysics.TryHandFloor(player, head, reachPoint, scale, out var floor))
+            {
+                hand.WritePose(floor.point + floor.normal * (0.045f * scale) + Vector3.up * lift, rotation);
+                if (forPhysics)
+                {
+                    bool isLeft = hand == left;
+                    float castRadius = isLeft ? player.minimumRaycastDistanceLeft : player.minimumRaycastDistanceRight;
+                    // The visible wrist clears the surface. The much smaller
+                    // native locomotion cast needs its center close to the floor.
+                    Vector3 contact = floor.point + floor.normal * (castRadius * 0.35f) + Vector3.up * lift;
+                    hand.WriteContact(player, isLeft, contact);
+                }
+                return;
+            }
 
-        // The native solver needs a contact stroke in F2. Keep the tracked wrist
-        // above the floor while leaving enough overlap for the solver's hand sphere.
-        target = pushing
-            ? FlatPhysics.KeepHandAboveFloor(player, eye, target, scale)
-            : FlatPhysics.PlaceRestingHand(player, anchor, target, scale);
-        hand.WritePose(target, basis * hand.Wrist);
+            float lowered = Mathf.Min(0.62f * scale, player.GetScaleAwareMaxArmLength(Vector3.down) * 0.65f);
+            hand.WritePose(reachPoint + Vector3.up * (lift - lowered), rotation);
+            return;
+        }
+
+        Vector3 offset = hand.Rest + new Vector3(0f, 0.025f * swing, 0.055f * swing);
+        Vector3 anchor = eye + yaw * (new Vector3(hand.Rest.x, -0.12f, 0.02f) * scale);
+        Vector3 target = FlatPhysics.PlaceRestingHand(player, anchor, eye + basis * (offset * scale), scale);
+        hand.WritePose(target, rotation);
     }
 
     private sealed class Hand
@@ -99,8 +105,8 @@ internal sealed class DesktopHands
         internal readonly Vector3 Rest;
         internal readonly Quaternion Wrist;
         internal readonly HandTrackingFeature Device;
-        internal Vector3 Offset;
-        internal bool Dragging;
+        internal Vector3 Offset { get; private set; }
+        internal bool Dragging { get; private set; }
 
         internal Hand(Transform nativeTracked, Transform collision, Component nativeController, Quaternion yaw, float side)
         {
@@ -127,7 +133,7 @@ internal sealed class DesktopHands
 
         internal void Reset()
         {
-            Offset = Rest;
+            Offset = new Vector3(Rest.x, 0f, Rest.z);
             Dragging = false;
         }
 
@@ -135,18 +141,18 @@ internal sealed class DesktopHands
 
         internal void UpdateDrag(bool dragging, Vector3 motion, float reach)
         {
-            Dragging = dragging;
             if (!dragging)
             {
-                Offset = Vector3.MoveTowards(Offset, Rest, 2.5f * Time.unscaledDeltaTime);
+                Reset();
                 return;
             }
 
+            Dragging = true;
             Vector3 target = Offset + motion;
             target.x = Mathf.Clamp(target.x * side, -0.24f, reach) * side;
-            target.y = Mathf.Clamp(target.y, -reach, reach * 0.82f);
-            target.z = Mathf.Clamp(target.z, -0.35f, reach);
-            Offset = Vector3.ClampMagnitude(target, reach);
+            target.z = Mathf.Clamp(target.z, -0.45f, reach);
+            Vector2 planar = Vector2.ClampMagnitude(new Vector2(target.x, target.z), reach);
+            Offset = new Vector3(planar.x, Mathf.Clamp(target.y, 0f, 0.85f), planar.y);
         }
 
         internal void WritePose(Vector3 position, Quaternion rotation)
@@ -161,6 +167,15 @@ internal sealed class DesktopHands
             // The ParentConstraint also follows the tracked pose later in the frame.
             // Physics needs it before Player.FixedUpdate runs.
             if (collision != tracked) collision.SetPositionAndRotation(position, rotation);
+        }
+
+        internal void WriteContact(Player player, bool isLeft, Vector3 center)
+        {
+            // CurrentHandPosition adds these offsets before doing the sphere cast.
+            Vector3 authoredOffset = isLeft ? player.leftHandOffset : player.rightHandOffset;
+            Vector3 nativeCenter = player.PositionWithOffset(collision, authoredOffset) +
+                player.GetHandLocomotionWorldOffset(isLeft) + player.GetHandPenetrationWorldOffset(isLeft);
+            collision.position += center - nativeCenter;
         }
 
         private static void SetPose(Transform target, Rigidbody body, Vector3 position, Quaternion rotation)

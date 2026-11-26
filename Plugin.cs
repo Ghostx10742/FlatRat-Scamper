@@ -13,7 +13,7 @@ namespace FlatRatScamper;
 public sealed class Plugin : BasePlugin
 {
     private const string Id = "jaxon.flatrat.scamper";
-    private const string Version = "0.1.5";
+    private const string Version = "0.1.6";
     private const float DefaultWalkSpeed = 2.35f;
     private const float DefaultSprintSpeed = 4f;
     private Harmony harmony;
@@ -83,7 +83,7 @@ public sealed class Plugin : BasePlugin
             if (!File.Exists(Config.ConfigFilePath)) return false;
             string firstLine = File.ReadLines(Config.ConfigFilePath).FirstOrDefault();
             return firstLine?.StartsWith(header, StringComparison.Ordinal) == true &&
-                System.Version.TryParse(firstLine[header.Length..], out var previous) && previous < new System.Version(Version);
+                System.Version.TryParse(firstLine[header.Length..], out var previous) && previous < new System.Version(0, 1, 5);
         }
         catch (IOException)
         {

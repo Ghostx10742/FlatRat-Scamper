@@ -25,7 +25,7 @@ public sealed class FlatRatController : MonoBehaviour
     private Quaternion eyeRestRotation;
     private DesktopHands hands;
     private readonly SprintStamina stamina = new();
-    private float pitch, viewYawOffset, crouch;
+    private float pitch, viewYawOffset;
     private bool physical, sprint, jumpQueued, xrStopped, cursorOwned, captureLook;
     private Vector2 walk;
     private CursorLockMode previousCursorLock;
@@ -66,10 +66,8 @@ public sealed class FlatRatController : MonoBehaviour
             sprint = stamina.Update(shiftHeld, walk.sqrMagnitude > 0.001f, Time.deltaTime);
             if (!captureLook || !Application.isFocused || !CanMoveBody || interactions.Focused || interactions.Climbing)
             {
-                hands?.CancelDrag();
+                hands?.Reset();
             }
-            float targetCrouch = physical ? hands?.Crouch ?? 0f : 0f;
-            crouch = Mathf.MoveTowards(crouch, targetCrouch, 5f * Time.deltaTime);
             ApplyCursor(Application.isFocused);
         }
         catch (Exception ex)
@@ -131,7 +129,7 @@ public sealed class FlatRatController : MonoBehaviour
         if (keyboard == null || mouse == null)
         {
             ResetInput();
-            hands.CancelDrag();
+            hands.Reset();
             return;
         }
 
@@ -221,7 +219,7 @@ public sealed class FlatRatController : MonoBehaviour
             eyeRestPosition.y = Mathf.Clamp(Plugin.StandingEyeHeight.Value, 0.65f, 2.2f);
         }
         eyeRestRotation = eyeTransform.localRotation;
-        pitch = viewYawOffset = crouch = 0f;
+        pitch = viewYawOffset = 0f;
         eyeRendering = eye.GetUniversalAdditionalCameraData();
         previousAllowXr = eyeRendering.allowXRRendering;
         eyeRendering.allowXRRendering = false;
@@ -277,12 +275,11 @@ public sealed class FlatRatController : MonoBehaviour
         physical = handMovement;
         ResetInput();
         hands.Reset();
-        crouch = 0f;
         player!.ForceReleaseClimbingHands();
         player.ClearHandMovementAnchors();
         ApplyTrackedPose();
         player.ResetSavedTransforms();
-        interactions.ShowStatus(physical ? "Hold a mouse button to reach. Add Shift for height." : "Keyboard movement");
+        interactions.ShowStatus(physical ? "Hold LMB or RMB to plant a hand" : "Keyboard movement");
     }
 
     private void ReadLook(Mouse mouse)
@@ -303,7 +300,7 @@ public sealed class FlatRatController : MonoBehaviour
         pitch = Mathf.Clamp(pitch - delta.y * sensitivity, -89f, 89f);
     }
 
-    private void ApplyTrackedPose()
+    private void ApplyTrackedPose(bool forPhysics = false)
     {
         if (!CanLook || interactions.Focused)
         {
@@ -311,11 +308,7 @@ public sealed class FlatRatController : MonoBehaviour
         }
 
         Transform head = eye!.transform;
-        Vector3 headPosition = eyeRestPosition;
-        // Reaching low in F2 lowers the tracked head like crouching in VR, so
-        // the native arm-length limit still allows pushing against the floor.
-        headPosition.y = Mathf.Lerp(eyeRestPosition.y, Mathf.Min(eyeRestPosition.y, 0.55f), crouch);
-        head.localPosition = headPosition;
+        head.localPosition = eyeRestPosition;
         head.localRotation = eyeRestRotation * Quaternion.Euler(pitch, 0f, 0f);
         if (Mathf.Abs(viewYawOffset) > 0.0001f)
         {
@@ -323,11 +316,11 @@ public sealed class FlatRatController : MonoBehaviour
         }
         if (CanMoveBody)
         {
-            hands?.Apply(head, physical);
+            hands?.Apply(head, physical, forPhysics);
         }
     }
 
-    internal void BeforeNativePhysics() => ApplyTrackedPose();
+    internal void BeforeNativePhysics() => ApplyTrackedPose(forPhysics: true);
 
     internal void AfterNativePhysics()
     {
@@ -388,7 +381,7 @@ public sealed class FlatRatController : MonoBehaviour
         if (!focused)
         {
             ResetInput();
-            hands?.CancelDrag();
+            hands?.Reset();
             interactions.Interrupt();
         }
         ApplyCursor(focused);
