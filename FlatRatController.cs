@@ -214,10 +214,6 @@ public sealed class FlatRatController : MonoBehaviour
         rightHand = player.rightHandTransform;
         var eyeTransform = eye.transform;
         eyeRestPosition = eyeTransform.localPosition;
-        if (Mathf.Abs(eyeRestPosition.y) < 0.20f)
-        {
-            eyeRestPosition.y = Mathf.Clamp(Plugin.StandingEyeHeight.Value, 0.65f, 2.2f);
-        }
         eyeRestRotation = eyeTransform.localRotation;
         pitch = viewYawOffset = 0f;
         eyeRendering = eye.GetUniversalAdditionalCameraData();

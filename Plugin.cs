@@ -21,7 +21,6 @@ public sealed class Plugin : BasePlugin
     private static ConfigEntry<bool> desktopEnabled = null!;
     internal static ManualLogSource Logger = null!;
     internal static ConfigEntry<float> MouseSensitivity = null!;
-    internal static ConfigEntry<float> StandingEyeHeight = null!;
     internal static ConfigEntry<float> WalkSpeed = null!;
     internal static ConfigEntry<float> SprintSpeed = null!;
     internal static ConfigEntry<float> JumpHeight = null!;
@@ -37,8 +36,6 @@ public sealed class Plugin : BasePlugin
         }
 
         MouseSensitivity = Config.Bind("Desktop", "MouseSensitivity", 0.13f, "Degrees of view rotation per mouse pixel.");
-        StandingEyeHeight = Config.Bind("Desktop", "EyeHeight", 1.58f,
-            "Standing tracking-space eye height in metres when no headset pose is available.");
         WalkSpeed = Config.Bind("Movement", "WalkSpeed", DefaultWalkSpeed, "Walking speed in metres per second at normal rig scale.");
         SprintSpeed = Config.Bind("Movement", "SprintSpeed", DefaultSprintSpeed, "Sprinting speed in metres per second at normal rig scale.");
         if (migrateSpeedDefaults && WalkSpeed.Value == 2.1f) WalkSpeed.Value = DefaultWalkSpeed;
